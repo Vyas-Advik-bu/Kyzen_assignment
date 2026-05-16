@@ -70,6 +70,9 @@ async def research_loop(
     tool_call_counts: dict[str, int] = {}
     # Global call counter — ensures tool_call ids are unique across all iterations
     global_call_counter = 0
+    # Consecutive text-only iterations — model may reason before calling tools,
+    # but if it does it twice in a row without a tool call we stop.
+    consecutive_text_only = 0
 
     for iteration in range(MAX_ITERATIONS):
         log.debug("loop_iteration", job_id=job_id, iteration=iteration)
@@ -93,10 +96,21 @@ async def research_loop(
             break
 
         if not pending_tool_calls:
-            # No tool calls and no stop signal — model is done or confused
+            # No tool calls and no stop signal.
+            # The model may have output reasoning text before it's ready to call tools.
+            # Add the response to conversation history and give it one more chance.
             if accumulated_text.strip():
-                log.warning("no_tool_calls_no_signal", job_id=job_id, text=accumulated_text[:200])
+                messages.append({"role": "assistant", "content": accumulated_text})
+                consecutive_text_only += 1
+                if consecutive_text_only < 2:
+                    log.warning("no_tool_calls_retrying", job_id=job_id,
+                                iteration=iteration, text=accumulated_text[:100])
+                    continue
+            log.warning("no_tool_calls_no_signal", job_id=job_id,
+                        iteration=iteration, text=accumulated_text[:200])
             break
+
+        consecutive_text_only = 0  # reset on any successful tool call
 
         # Assign globally unique IDs so repeated iterations don't collide
         for tc in pending_tool_calls:
