@@ -1,0 +1,59 @@
+services:
+  ollama:
+    image: ollama/ollama:latest
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  # One-shot service: pulls models then exits. Backend waits for this.
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    entrypoint: >
+      sh -c "
+        echo 'Pulling qwen3:8b (primary model ~5GB)...' &&
+        ollama pull qwen3:8b &&
+        echo 'Pulling llama3.1:8b (fallback model ~5GB)...' &&
+        ollama pull llama3.1:8b &&
+        echo 'Models ready.'
+      "
+    volumes:
+      - ollama_data:/root/.ollama
+
+  backend:
+    build: ./backend
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://ollama:11434
+      - PRIMARY_MODEL=qwen3:8b
+      - FALLBACK_MODEL=llama3.1:8b
+    depends_on:
+      ollama-init:
+        condition: service_completed_successfully
+    develop:
+      watch:
+        - action: sync+restart
+          path: ./backend/app
+          target: /app/app
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+
+volumes:
+  ollama_data:
