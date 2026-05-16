@@ -140,6 +140,27 @@ def _safe_company_type(raw: Any) -> CompanyType:
         return CompanyType.UNKNOWN
 
 
+async def _verify_ticker(ticker: str, expected_name: str) -> str | None:
+    """Return the ticker if yfinance confirms it belongs to expected_name, else None.
+    Prevents the LLM confusing company names with unrelated ticker symbols
+    (e.g. 'Samsung' → ticker 'SM' which is SM Energy, not Samsung Electronics)."""
+    import yfinance as yf
+    try:
+        info = await asyncio.to_thread(lambda: yf.Ticker(ticker).info or {})
+        yf_name = (info.get("longName") or info.get("shortName") or "").lower()
+        if not yf_name:
+            return ticker  # yfinance returned nothing — keep ticker, let research decide
+        # Check if any word from the user's company name appears in the yfinance name
+        expected_words = {w for w in expected_name.lower().split() if len(w) > 2}
+        if expected_words & set(yf_name.split()):
+            return ticker
+        log.warning("ticker_mismatch_nulled", ticker=ticker,
+                    expected=expected_name, yfinance_name=yf_name)
+        return None  # Ticker belongs to a different company — discard it
+    except Exception:
+        return ticker  # Don't block the pipeline on a lookup failure
+
+
 def _update_company_from_evidence(
     company: ResolvedCompany, evidence: list[dict[str, Any]]
 ) -> ResolvedCompany:
@@ -253,9 +274,17 @@ async def run_pipeline(job: ResearchJob, bus: JobEventBus) -> None:
                                         "Failed to identify company", phase="resolve"))
                 return
 
+            resolved_ticker = resolve_data.get("ticker")
+            resolved_name = resolve_data.get("name", job.company_name)
+
+            # Sanity-check: if the LLM gave a ticker, verify yfinance agrees it belongs
+            # to this company (guards against e.g. "Samsung" → ticker "SM" = SM Energy).
+            if resolved_ticker:
+                resolved_ticker = await _verify_ticker(resolved_ticker, resolved_name)
+
             company = ResolvedCompany(
-                name=resolve_data.get("name", job.company_name),
-                ticker=resolve_data.get("ticker"),
+                name=resolved_name,
+                ticker=resolved_ticker,
                 type=_safe_company_type(resolve_data.get("type")),
                 exchange=resolve_data.get("exchange"),
             )
