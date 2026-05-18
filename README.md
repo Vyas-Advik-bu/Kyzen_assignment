@@ -1,6 +1,6 @@
 # Company Research Agent
 
-A production-leaning agentic system that researches any company on demand, producing a structured portfolio and Excel workbook. All computation runs locally — $0 API cost, no external keys required.
+A production-leaning agentic system that researches any company on demand, producing a structured portfolio and Excel workbook. All computation runs locally. $0 API cost, no external keys required.
 
 ## Architecture
 
@@ -12,14 +12,14 @@ FastAPI (SSE stream)
     │
     ▼
 4-Phase Pipeline
-├── Phase 0 · RESOLVE    — LLM identifies company, ticker, public/private
-├── Phase 1 · RESEARCH   — Bounded tool-calling loop (12 iter max)
+├── Phase 0 · RESOLVE    - LLM identifies company, ticker, public/private
+├── Phase 1 · RESEARCH   - Bounded tool-calling loop (12 iter max)
 │   ├── get_company_profile(ticker)    → yfinance (free)
 │   ├── get_company_financials(ticker) → yfinance (free)
 │   ├── web_search(query)              → DuckDuckGo (free, with jitter)
 │   └── fetch_page(url)               → httpx + trafilatura + LLM summary
-├── Phase 2 · SYNTHESIZE — LLM structures evidence → Portfolio JSON
-└── Phase 3 · EXCEL      — openpyxl builds formatted workbook + chart
+├── Phase 2 · SYNTHESIZE - LLM structures evidence → Portfolio JSON
+└── Phase 3 · EXCEL      - openpyxl builds formatted workbook + chart
     │
     ▼
 SSE Events (streamed to frontend)
@@ -51,7 +51,7 @@ React UI (live timeline + tool call cards + portfolio view)
 | Primary orchestrator | `qwen3:8b` | Best open-weight tool-caller at ~5GB |
 | Fallback | `llama3.1:8b` | Different model family for failure diversity |
 
-## Data Sources (all free, no API keys)
+## Data Sources (Free software, potential upgrades with better models and better search)
 
 - **yfinance** — structured financials for public companies (revenue, margins, income statements)
 - **DuckDuckGo** via `ddgs` — web search for qualitative research
