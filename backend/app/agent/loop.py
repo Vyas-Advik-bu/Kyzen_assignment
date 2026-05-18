@@ -1,8 +1,4 @@
-"""
-The raw tool-calling research loop for Phase 1.
-Runs against Ollama, emitting AgentEvents to the bus as it works.
-Bounded by MAX_ITERATIONS to prevent runaway on unreliable local models.
-"""
+"""Tool-calling research loop for Phase 1."""
 import json
 import time
 from typing import Any
@@ -22,7 +18,7 @@ from app.observability.logging import get_logger
 
 log = get_logger(__name__)
 
-MAX_ITERATIONS = 12
+MAX_ITERATIONS = 8
 DONE_SIGNAL = "RESEARCH_COMPLETE"
 
 # Per-tool call caps — prevent fetch-all traps and semantic oscillation loops.

@@ -117,6 +117,7 @@ def _build_overview(wb: openpyxl.Workbook, p: Portfolio) -> None:
         ("Website", _safe(c.website)),
         ("Founded", _safe(c.founded)),
         ("Headquarters", _safe(c.headquarters)),
+        ("Description", _safe(c.description)),
         ("", ""),
         ("Employees", _safe(p.headcount.value if p.headcount else None)),
         ("Market Cap", _millions(fin.market_cap)),
@@ -133,11 +134,14 @@ def _build_overview(wb: openpyxl.Workbook, p: Portfolio) -> None:
     ]
 
     ws.column_dimensions["A"].width = 22
-    ws.column_dimensions["B"].width = 55
+    ws.column_dimensions["B"].width = 80
     _header_row(ws, 1, ["Field", "Value"])
     for i, (label, value) in enumerate(rows, start=2):
         ws.cell(row=i, column=1, value=label).font = Font(bold=bool(label))
-        ws.cell(row=i, column=2, value=_safe_str(value))
+        cell = ws.cell(row=i, column=2, value=_safe_str(value))
+        if label == "Description":
+            cell.alignment = Alignment(wrap_text=True)
+            ws.row_dimensions[i].height = 80
 
     if p.key_products:
         r = len(rows) + 3

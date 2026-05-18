@@ -1,7 +1,6 @@
-# GPU override — merge with base compose for NVIDIA GPU acceleration:
-#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
-#
-# Requires: NVIDIA drivers + nvidia-container-toolkit installed on the host.
+# NVIDIA GPU override.
+# Usage: docker compose -f docker-compose.yml -f docker-compose.gpu.yml up
+# Prerequisites: NVIDIA drivers and nvidia-container-toolkit
 
 services:
   ollama:

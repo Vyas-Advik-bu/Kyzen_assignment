@@ -62,7 +62,7 @@ def _build_registry(llm: OllamaClient, disable_web_search: bool = False) -> Tool
     if not disable_web_search:
         registry.register(Tool(
             name="web_search",
-            description="Search the web via DuckDuckGo. Use specific queries including company name.",
+            description="Search the web via Tavily. Use specific queries including company name.",
             parameters={
                 "type": "object",
                 "properties": {

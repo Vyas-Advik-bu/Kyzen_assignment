@@ -240,34 +240,53 @@ class TestB1SSRF:
             _validate_url("http://metadata.google.internal/")
 
 
-# ── A12: DDG empty results treated as failure ─────────────────────────────────
+# ── A12: Empty search results treated as failure (retried) ────────────────────
 
-class TestA12DDGEmptyResults:
+class TestA12EmptySearchResults:
     async def test_empty_results_raises_and_retries(self):
         call_count = 0
 
-        def fake_text(*args, **kwargs):
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {"results": []}  # Tavily returns empty
+
+        async def fake_post(*args, **kwargs):
             nonlocal call_count
             call_count += 1
-            return []  # always empty
+            return mock_response
 
-        # Patch both the pre-call jitter AND retry sleeps so the test is instant
-        with patch("app.tools.web_search.DDGS") as mock_ddgs, \
+        mock_client = MagicMock()
+        mock_client.post = fake_post
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.tools.web_search.httpx.AsyncClient", return_value=mock_client), \
              patch("app.tools.web_search.asyncio.sleep"), \
              patch("app.resilience.retry.asyncio.sleep"):
-            mock_ddgs.return_value.text.side_effect = fake_text
             result = await web_search("test query", max_results=3)
 
-        # Empty results: retried (max_attempts=3) then circuit breaker catches
         assert call_count > 1  # confirmed retry happened
-        assert result == []    # still returns [] after exhaustion (graceful)
+        assert result == []    # graceful [] after exhaustion
 
     async def test_nonempty_results_returned_normally(self):
-        fake = [{"title": "Apple", "href": "https://apple.com", "body": "tech"}]
-        with patch("app.tools.web_search.DDGS") as mock_ddgs, \
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        mock_response.json.return_value = {
+            "results": [{"title": "Apple", "url": "https://apple.com", "content": "tech"}]
+        }
+
+        async def fake_post(*args, **kwargs):
+            return mock_response
+
+        mock_client = MagicMock()
+        mock_client.post = fake_post
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("app.tools.web_search.httpx.AsyncClient", return_value=mock_client), \
              patch("app.tools.web_search.asyncio.sleep"):
-            mock_ddgs.return_value.text.return_value = fake
             result = await web_search("Apple revenue 2025")
+
         assert len(result) == 1
         assert result[0]["title"] == "Apple"
 

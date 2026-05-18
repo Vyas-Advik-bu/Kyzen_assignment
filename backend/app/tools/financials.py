@@ -1,7 +1,4 @@
-"""
-yfinance-backed tools — $0 cost, no API key.
-Covers publicly traded companies only; callers must handle the None case.
-"""
+"""Company profile and financial data via yfinance."""
 import asyncio
 from typing import Any
 
@@ -16,94 +13,114 @@ log = get_logger(__name__)
 _cb = CircuitBreaker(name="yfinance", failure_threshold=3, recovery_timeout=120.0)
 
 
-def _fetch_info(ticker: str) -> dict[str, Any]:
-    t = yf.Ticker(ticker)
-    return t.info or {}
-
-
-def _fetch_financials(ticker: str) -> dict[str, Any]:
-    t = yf.Ticker(ticker)
-    result: dict[str, Any] = {}
-
+def _safe_float(v: Any) -> float | None:
+    if v is None:
+        return None
     try:
-        inc = t.income_stmt
-        if inc is not None and not inc.empty:
-            rows = []
-            for col in inc.columns[:4]:  # up to 4 years
-                year = col.year if hasattr(col, "year") else int(str(col)[:4])
-                def _get(field: str) -> float | None:
-                    try:
-                        v = inc.loc[field, col]
-                        return None if v != v else float(v)  # NaN check
-                    except KeyError:
-                        return None
-                rows.append({
-                    "year": year,
-                    "revenue": _get("Total Revenue"),
-                    "gross_profit": _get("Gross Profit"),
-                    "operating_income": _get("Operating Income"),
-                    "net_income": _get("Net Income"),
-                    "ebitda": _get("EBITDA"),
-                })
-            result["annual"] = rows
-    except Exception as exc:
-        log.warning("financials_income_stmt_error", ticker=ticker, error=str(exc))
+        f = float(v)
+        return None if f != f else f  # NaN guard
+    except (TypeError, ValueError):
+        return None
 
-    return result
+
+def _fetch_info(ticker: str) -> dict:
+    return yf.Ticker(ticker).info or {}
+
+
+def _fetch_income(ticker: str) -> list[dict]:
+    try:
+        inc = yf.Ticker(ticker).income_stmt
+        if inc is None or inc.empty:
+            return []
+        rows = []
+        for col in inc.columns[:4]:
+            def _row(label: str) -> float | None:
+                if label in inc.index:
+                    return _safe_float(inc.loc[label, col])
+                return None
+            rows.append({
+                "year": col.year,
+                "revenue": _row("Total Revenue"),
+                "gross_profit": _row("Gross Profit"),
+                "operating_income": _row("Operating Income"),
+                "net_income": _row("Net Income"),
+                "ebitda": _row("EBITDA"),
+            })
+        return rows
+    except Exception:
+        return []
 
 
 async def get_company_profile(ticker: str) -> dict[str, Any]:
-    """Return company info dict from yfinance (sector, employees, description, etc.)."""
+    """Return company profile from yfinance: sector, employees, description, etc."""
     async def _call() -> dict[str, Any]:
-        return await asyncio.to_thread(_fetch_info, ticker)
-
-    try:
-        info = await _cb.call(lambda: retry_async(_call, max_attempts=2, label=f"yf.info/{ticker}"))
-        if not info:
-            # Yahoo Finance returned an empty dict — likely a blocked user-agent or invalid ticker
-            log.warning("yfinance_empty_response", ticker=ticker)
-            return {}
+        info = await asyncio.to_thread(_fetch_info, ticker)
         return {
-            "name": info.get("longName") or info.get("shortName"),
+            "name": info.get("longName"),
             "sector": info.get("sector"),
             "industry": info.get("industry"),
             "country": info.get("country"),
             "website": info.get("website"),
-            "description": (info.get("longBusinessSummary") or "")[:1200],
+            "description": info.get("longBusinessSummary") or "",
             "employees": info.get("fullTimeEmployees"),
             "founded": info.get("foundingDate"),
             "headquarters": info.get("city"),
             "exchange": info.get("exchange"),
         }
+
+    try:
+        return await _cb.call(lambda: retry_async(
+            _call, max_attempts=2, label=f"yf.profile/{ticker}"
+        ))
     except Exception as exc:
         log.warning("get_company_profile_failed", ticker=ticker, error=str(exc))
         return {}
 
 
 async def get_company_financials(ticker: str) -> dict[str, Any]:
-    """Return structured financial data: market cap, margins, annual income statements."""
-    async def _call_info() -> dict[str, Any]:
-        return await asyncio.to_thread(_fetch_info, ticker)
-
-    async def _call_fins() -> dict[str, Any]:
-        return await asyncio.to_thread(_fetch_financials, ticker)
-
-    try:
-        info, fins = await asyncio.gather(
-            _cb.call(lambda: retry_async(_call_info, max_attempts=2, label=f"yf.info2/{ticker}")),
-            _cb.call(lambda: retry_async(_call_fins, max_attempts=2, label=f"yf.fins/{ticker}")),
+    """Return structured financials from yfinance: market cap, margins, income statements."""
+    async def _call() -> dict[str, Any]:
+        info, annual = await asyncio.gather(
+            asyncio.to_thread(_fetch_info, ticker),
+            asyncio.to_thread(_fetch_income, ticker),
         )
         return {
-            "market_cap": info.get("marketCap"),
-            "enterprise_value": info.get("enterpriseValue"),
-            "pe_ratio": info.get("trailingPE"),
-            "revenue_ttm": info.get("totalRevenue"),
-            "gross_margin": info.get("grossMargins"),
-            "net_margin": info.get("profitMargins"),
-            "revenue_growth_yoy": info.get("revenueGrowth"),
+            "market_cap": _safe_float(info.get("marketCap")),
+            "enterprise_value": _safe_float(info.get("enterpriseValue")),
+            "pe_ratio": _safe_float(info.get("trailingPE")),
+            "revenue_ttm": _safe_float(info.get("totalRevenue")),
+            "gross_margin": _safe_float(info.get("grossMargins")),
+            "net_margin": _safe_float(info.get("profitMargins")),
+            "revenue_growth_yoy": _safe_float(info.get("revenueGrowth")),
             "currency": info.get("financialCurrency", "USD"),
-            **fins,
+            "annual": annual,
         }
+
+    try:
+        return await _cb.call(lambda: retry_async(
+            _call, max_attempts=2, label=f"yf.financials/{ticker}"
+        ))
     except Exception as exc:
         log.warning("get_company_financials_failed", ticker=ticker, error=str(exc))
         return {}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# FMP (Financial Modeling Prep) implementation
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+# import httpx
+# from app.config import settings
+#
+# _BASE = "https://financialmodelingprep.com/api/v3"
+#
+# async def _fmp_get(path):
+#     url = f"{_BASE}{path}"
+#     params = {"apikey": settings.fmp_api_key}
+#     async with httpx.AsyncClient(timeout=15.0) as client:
+#         resp = await client.get(url, params=params)
+#         resp.raise_for_status()
+#         return resp.json()
+#
+# async def get_company_profile(ticker): ...
+# async def get_company_financials(ticker): ...

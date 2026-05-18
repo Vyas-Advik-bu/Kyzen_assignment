@@ -1,52 +1,13 @@
 services:
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
-
-  # One-shot service: pulls models then exits. Backend waits for this.
-  ollama-init:
-    image: ollama/ollama:latest
-    depends_on:
-      ollama:
-        condition: service_healthy
-    environment:
-      - OLLAMA_HOST=http://ollama:11434
-    entrypoint: >
-      sh -c "
-        echo 'Pulling qwen3:8b (primary model ~5GB)...' &&
-        ollama pull qwen3:8b &&
-        echo 'Pulling llama3.1:8b (fallback model ~5GB)...' &&
-        ollama pull llama3.1:8b &&
-        echo 'Models ready.'
-      "
-    volumes:
-      - ollama_data:/root/.ollama
-
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     environment:
-      - OLLAMA_BASE_URL=http://ollama:11434
-      - PRIMARY_MODEL=qwen3:8b
-      - FALLBACK_MODEL=llama3.1:8b
-    depends_on:
-      ollama-init:
-        condition: service_completed_successfully
-    develop:
-      watch:
-        - action: sync+restart
-          path: ./backend/app
-          target: /app/app
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}      # https://aistudio.google.com/apikey
+      - TAVILY_API_KEY=${TAVILY_API_KEY:-}      # https://app.tavily.com
+      - PRIMARY_MODEL=gemini-3.1-flash-lite
+      - FALLBACK_MODEL=gemini-2.5-flash-lite
 
   frontend:
     build: ./frontend
@@ -55,5 +16,40 @@ services:
     depends_on:
       - backend
 
-volumes:
-  ollama_data:
+# ═══════════════════════════════════════════════════════════════════════════════
+# Ollama (local LLM) services
+# ═══════════════════════════════════════════════════════════════════════════════
+#
+#  ollama:
+#    image: ollama/ollama:latest
+#    ports:
+#      - "11434:11434"
+#    volumes:
+#      - ollama_data:/root/.ollama
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+#      interval: 5s
+#      timeout: 5s
+#      retries: 10
+#      start_period: 10s
+#
+#  ollama-init:
+#    image: ollama/ollama:latest
+#    depends_on:
+#      ollama:
+#        condition: service_healthy
+#    environment:
+#      - OLLAMA_HOST=http://ollama:11434
+#    entrypoint: >
+#      sh -c "ollama pull qwen3:8b && ollama pull llama3.1:8b && echo 'Models ready.'"
+#    volumes:
+#      - ollama_data:/root/.ollama
+#
+#  # backend environment:
+#  #   - OLLAMA_BASE_URL=http://ollama:11434
+#  #   - PRIMARY_MODEL=qwen3:8b
+#  #   - FALLBACK_MODEL=llama3.1:8b
+#  #   depends_on: ollama-init (condition: service_completed_successfully)
+#
+# volumes:
+#   ollama_data:
